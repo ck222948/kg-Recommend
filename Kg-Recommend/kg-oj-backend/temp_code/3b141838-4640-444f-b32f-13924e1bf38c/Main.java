@@ -1,0 +1,1 @@
+public class Main { public static void main(String[] args) { System.out.println("Hello OJ! 知识图谱沙箱执行成功！"); } }
