@@ -14,6 +14,7 @@ public class JudgeController {
 
     @PostMapping("/submit")
     public String submitCode(@RequestBody SubmitRequest request) {
+        // request.getQuestionId() 现在返回 String
         return judgeService.judge(request.getQuestionId(), request.getCode());
     }
 }

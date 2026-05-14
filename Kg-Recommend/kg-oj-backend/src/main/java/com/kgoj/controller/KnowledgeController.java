@@ -33,7 +33,7 @@ public class KnowledgeController {
         Map<String, Object> result = new HashMap<>();
         
         try {
-            String cypher = "MATCH (kp) WHERE toString(id(kp)) = '" + id + "' OR toString(kp.id) = '" + id + "' " +
+            String cypher = "MATCH (kp) WHERE kp.elementId = '" + id + "' OR toString(id(kp)) = '" + id + "' OR toString(kp.id) = '" + id + "' " +
                             "OPTIONAL MATCH (kp)-[:PRE_REQUISITE]->(pre) " +
                             "OPTIONAL MATCH (ex:Exercise)-[:TESTS]->(kp) " +
                             "RETURN kp.name AS name, labels(kp)[0] AS type, " +
@@ -45,11 +45,13 @@ public class KnowledgeController {
                 result.put("name", row.get("name"));
                 result.put("type", row.get("type"));
                 
+                @SuppressWarnings("unchecked")
                 List<Map<String, Object>> preList = (List<Map<String, Object>>) row.get("preKnowledges");
                 List<Map<String, Object>> cleanPreList = new ArrayList<>();
                 for(Map<String, Object> m : preList) { if(m.get("id") != null && !m.get("id").toString().equals("null")) cleanPreList.add(m); }
                 result.put("preKnowledges", cleanPreList);
 
+                @SuppressWarnings("unchecked")
                 List<Map<String, Object>> exList = (List<Map<String, Object>>) row.get("relatedExercises");
                 List<Map<String, Object>> cleanExList = new ArrayList<>();
                 for(Map<String, Object> m : exList) { if(m.get("id") != null && !m.get("id").toString().equals("null")) cleanExList.add(m); }
@@ -67,7 +69,7 @@ public class KnowledgeController {
                         result.put("description", "系统暂无该节点的详细介绍 (" + row.get("name") + ")。");
                     }
                 } catch (Exception parseEx) {
-                    result.put("description", "ID格式不匹配");
+                    result.put("description", "系统暂无该节点的详细介绍 (" + row.get("name") + ")。");
                 }
             });
 
