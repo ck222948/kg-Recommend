@@ -66,13 +66,14 @@ public class DiagnosisController {
 
             if (!foundExercise) {
                 // 如果找不到低级别题，找有没有对应的教程可以退回
-                String tutCypher = "MATCH (tut:Tutorial)-[:EXPLAINS]->(kp) " +
-                                   "WHERE elementId(kp) = '" + conceptId + "' OR toString(kp.id) = '" + conceptId + "' " +
+                String tutCypher = "MATCH (tut)-[:EXPLAINS]->(kp) " +
+                                   "WHERE (tut:Video OR tut:Article) " +
+                                   "AND (elementId(kp) = '" + conceptId + "' OR toString(kp.id) = '" + conceptId + "') " +
                                    "RETURN elementId(tut) AS tutId, tut.title AS tutTitle, tut.url AS tutUrl LIMIT 1";
                 
                 boolean foundTutorial = false;
                 for (Map<String, Object> row : neo4jClient.query(tutCypher).fetch().all()) {
-                    result.put("recommendType", "Tutorial");
+                    result.put("recommendType", "Resource");
                     result.put("tutorialId", row.get("tutId"));
                     result.put("tutorialTitle", row.get("tutTitle"));
                     result.put("tutorialUrl", row.get("tutUrl"));

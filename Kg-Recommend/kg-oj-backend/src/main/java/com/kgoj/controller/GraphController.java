@@ -17,78 +17,90 @@ public class GraphController {
     private Neo4jClient neo4jClient;
 
     @GetMapping("/all")
-    public Map<String, Object> getGraphData(@RequestParam(required = false) String module) {
+    public Map<String, Object> getGraphData(@RequestParam(required = false, defaultValue = "ALL") String module) {
         Map<String, Object> result = new HashMap<>();
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Map<String, Object>> edges = new ArrayList<>();
 
-        String cypher;
-        if (module != null && !module.isEmpty() && !module.equals("ALL") && !module.equals("LOBBY")) {
-            // 子图模式：查询特定大类，及其相关的微观知识点、题目和教程。包括它们互相之间的所有关系。
-            cypher = "MATCH (macro:MacroConcept {name: '" + module + "'}) " +
-                     "OPTIONAL MATCH (micro:MicroConcept)-[r_belong:BELONGS_TO]->(macro) " +
-                     "OPTIONAL MATCH (micro)-[r_pre:PRE_REQUISITE]->(pre:MicroConcept) " +
-                     "OPTIONAL MATCH (ex:Exercise)-[r_test:TESTS]->(micro) " +
-                     "OPTIONAL MATCH (tut:Tutorial)-[r_exp:EXPLAINS]->(micro) " +
-                     "RETURN macro, micro, pre, ex, tut, r_belong, r_pre, r_test, r_exp LIMIT 300";
-        } else if ("ALL".equals(module)) {
-            // 上帝视角：查询图数据库里的一切点和一切边！
-            cypher = "MATCH (n)-[r]->(m) RETURN n AS sourceNode, r AS rel, m AS targetNode LIMIT 500";
-            
-            neo4jClient.query(cypher).fetch().all().forEach(row -> {
-                org.neo4j.driver.types.Node sourceNode = (org.neo4j.driver.types.Node) row.get("sourceNode");
-                org.neo4j.driver.types.Node targetNode = (org.neo4j.driver.types.Node) row.get("targetNode");
-                org.neo4j.driver.types.Relationship rel = (org.neo4j.driver.types.Relationship) row.get("rel");
-                
-                if (sourceNode != null) addNode(nodes, sourceNode);
-                if (targetNode != null) addNode(nodes, targetNode);
-                if (rel != null) addEdge(edges, rel);
-            });
-            
-            result.put("nodes", nodes);
-            result.put("edges", edges);
-            return result;
-            
+        String normalizedModule = module == null || module.isBlank() ? "ALL" : module;
+
+        if ("LOBBY".equalsIgnoreCase(normalizedModule)) {
+            queryLobby(nodes);
+        } else if ("ALL".equalsIgnoreCase(normalizedModule)) {
+            queryAllGraph(nodes, edges);
         } else {
-            // LOBBY 模式：只查询大厅入口卡片 (只查 MacroConcept)
-            cypher = "MATCH (n:MacroConcept) RETURN n LIMIT 20";
-            
-            neo4jClient.query(cypher).fetch().all().forEach(row -> {
-                org.neo4j.driver.types.Node node = (org.neo4j.driver.types.Node) row.get("n");
-                if (node != null) addNode(nodes, node);
-            });
-            result.put("nodes", nodes);
-            result.put("edges", edges);
-            return result;
+            queryModuleGraph(normalizedModule, nodes, edges);
         }
-
-        // 解析子图模式的复杂行
-        neo4jClient.query(cypher).fetch().all().forEach(row -> {
-            org.neo4j.driver.types.Node macro = (org.neo4j.driver.types.Node) row.get("macro");
-            if (macro != null) addNode(nodes, macro);
-
-            org.neo4j.driver.types.Node micro = (org.neo4j.driver.types.Node) row.get("micro");
-            if (micro != null) addNode(nodes, micro);
-            
-            org.neo4j.driver.types.Node pre = (org.neo4j.driver.types.Node) row.get("pre");
-            if (pre != null) addNode(nodes, pre);
-            
-            org.neo4j.driver.types.Node ex = (org.neo4j.driver.types.Node) row.get("ex");
-            if (ex != null) addNode(nodes, ex);
-            
-            org.neo4j.driver.types.Node tut = (org.neo4j.driver.types.Node) row.get("tut");
-            if (tut != null) addNode(nodes, tut);
-
-            // 解析边
-            addEdge(edges, row.get("r_belong"));
-            addEdge(edges, row.get("r_pre"));
-            addEdge(edges, row.get("r_test"));
-            addEdge(edges, row.get("r_exp"));
-        });
 
         result.put("nodes", nodes);
         result.put("edges", edges);
         return result;
+    }
+
+    private void queryLobby(List<Map<String, Object>> nodes) {
+        String cypher = "MATCH (n:MacroConcept) RETURN n ORDER BY coalesce(n.order, 999), n.name LIMIT 50";
+
+        neo4jClient.query(cypher).fetch().all().forEach(row -> {
+            org.neo4j.driver.types.Node node = (org.neo4j.driver.types.Node) row.get("n");
+            if (node != null) addNode(nodes, node);
+        });
+    }
+
+    private void queryAllGraph(List<Map<String, Object>> nodes, List<Map<String, Object>> edges) {
+        String cypher = "MATCH (sourceNode) " +
+                "OPTIONAL MATCH (sourceNode)-[rel]->(targetNode) " +
+                "RETURN sourceNode, rel, targetNode LIMIT 800";
+
+        addGraphRows(cypher, null, nodes, edges);
+    }
+
+    private void queryModuleGraph(String module, List<Map<String, Object>> nodes, List<Map<String, Object>> edges) {
+        String cypher = "MATCH (macro:MacroConcept {name: $module}) " +
+                "OPTIONAL MATCH (micro)-[:BELONGS_TO]->(macro) " +
+                "OPTIONAL MATCH (micro)-[:PRE_REQUISITE]->(pre) " +
+                "OPTIONAL MATCH (ex:Exercise)-[:TESTS]->(micro) " +
+                "OPTIONAL MATCH (res)-[:EXPLAINS]->(micro) " +
+                "WHERE res:Video OR res:Article " +
+                "WITH collect(DISTINCT macro) + collect(DISTINCT micro) + collect(DISTINCT pre) + collect(DISTINCT ex) + collect(DISTINCT res) AS rawNodes " +
+                "UNWIND rawNodes AS sourceNode " +
+                "WITH collect(DISTINCT sourceNode) AS graphNodes " +
+                "UNWIND graphNodes AS sourceNode " +
+                "WITH graphNodes, sourceNode WHERE sourceNode IS NOT NULL " +
+                "OPTIONAL MATCH (sourceNode)-[rel]->(targetNode) " +
+                "WHERE targetNode IN graphNodes " +
+                "RETURN sourceNode, rel, targetNode LIMIT 500";
+
+        addGraphRows(cypher, module, nodes, edges);
+    }
+
+    private void addGraphRows(String cypher, String module,
+                              List<Map<String, Object>> nodes,
+                              List<Map<String, Object>> edges) {
+        if (module != null) {
+            neo4jClient.query(cypher)
+                    .bind(module).to("module")
+                    .fetch()
+                    .all()
+                    .forEach(row -> addGraphRow(row, nodes, edges));
+            return;
+        }
+
+        neo4jClient.query(cypher)
+                .fetch()
+                .all()
+                .forEach(row -> addGraphRow(row, nodes, edges));
+    }
+
+    private void addGraphRow(Map<String, Object> row,
+                             List<Map<String, Object>> nodes,
+                             List<Map<String, Object>> edges) {
+        org.neo4j.driver.types.Node sourceNode = (org.neo4j.driver.types.Node) row.get("sourceNode");
+        org.neo4j.driver.types.Node targetNode = (org.neo4j.driver.types.Node) row.get("targetNode");
+        org.neo4j.driver.types.Relationship rel = (org.neo4j.driver.types.Relationship) row.get("rel");
+
+        if (sourceNode != null) addNode(nodes, sourceNode);
+        if (targetNode != null) addNode(nodes, targetNode);
+        if (rel != null) addEdge(edges, rel);
     }
 
     private void addNode(List<Map<String, Object>> nodes, org.neo4j.driver.types.Node neoNode) {
@@ -97,7 +109,14 @@ public class GraphController {
         
         Map<String, Object> map = new HashMap<>();
         map.put("id", id);
-        map.put("type", neoNode.labels().iterator().next());
+        String nodeType = neoNode.labels().iterator().next();
+        for (String candidate : List.of("MacroConcept", "MicroConcept", "KnowledgePoint", "Exercise", "Video", "Article")) {
+            if (neoNode.hasLabel(candidate)) {
+                nodeType = candidate;
+                break;
+            }
+        }
+        map.put("type", nodeType);
         
         if (!neoNode.get("name").isNull()) map.put("label", neoNode.get("name").asString());
         else if (!neoNode.get("title").isNull()) map.put("label", neoNode.get("title").asString());
@@ -105,7 +124,11 @@ public class GraphController {
 
         if (!neoNode.get("difficulty").isNull()) map.put("difficulty", neoNode.get("difficulty").asString());
         if (!neoNode.get("url").isNull()) map.put("url", neoNode.get("url").asString());
-        if (!neoNode.get("id").isNull()) map.put("exId", neoNode.get("id").asLong());
+        if (!neoNode.get("id").isNull()) {
+            Object businessId = neoNode.get("id").asObject();
+            map.put("detailId", businessId);
+            map.put("exId", businessId);
+        }
 
         nodes.add(map);
     }

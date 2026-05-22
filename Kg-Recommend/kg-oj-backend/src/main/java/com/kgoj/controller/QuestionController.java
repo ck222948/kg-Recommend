@@ -5,6 +5,8 @@ import com.kgoj.repository.jpa.QuestionDetailRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 @RestController
@@ -21,10 +23,16 @@ public class QuestionController {
         return "题目详情保存成功！";
     }
 
-    // 2. 根据 ID 查询题目详情（从 MySQL 获取）
+    // 2. 根据 ID 查询题目详情（从 MySQL 获取）；如果不是数字，则按标题兜底查询
     @GetMapping("/{id}")
-    public QuestionDetail getQuestionDetail(@PathVariable Long id) {
-        Optional<QuestionDetail> optional = questionDetailRepository.findById(id);
+    public QuestionDetail getQuestionDetail(@PathVariable String id) {
+        Optional<QuestionDetail> optional = Optional.empty();
+        try {
+            optional = questionDetailRepository.findById(Long.parseLong(id));
+        } catch (NumberFormatException ignored) {
+            String title = URLDecoder.decode(id, StandardCharsets.UTF_8);
+            optional = questionDetailRepository.findFirstByTitle(title);
+        }
         return optional.orElse(null);
     }
 }
